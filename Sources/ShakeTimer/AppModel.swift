@@ -1,5 +1,7 @@
+import AppKit
 import Foundation
 import ShakeTimerCore
+import SwiftUI
 
 @MainActor
 final class AppModel: ObservableObject {
@@ -10,6 +12,7 @@ final class AppModel: ObservableObject {
             settingsStore.save(settings)
             if overlayManager.isActive {
                 overlayManager.refreshIfActive(
+                    kind: settings.visualCueKind,
                     intensity: settings.visualIntensity,
                     maxDuration: settings.maxAlarmSeconds,
                     respectReduceMotion: settings.respectReduceMotion
@@ -40,6 +43,7 @@ final class AppModel: ObservableObject {
     private let hotKeyManager = HotKeyManager()
     private var tickTimer: Timer?
     private var calendarPollTimer: Timer?
+    private var settingsWindow: NSWindow?
     private var triggeredEventIDs = Set<String>()
 
     var statusTitle: String {
@@ -127,6 +131,36 @@ final class AppModel: ObservableObject {
         timerSnapshot = timerEngine.snapshot
     }
 
+    func previewVisualCue() {
+        fireAlarm(title: "Preview: \(settings.visualCueKind.title)")
+    }
+
+    func openSettings() {
+        if let settingsWindow {
+            settingsWindow.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 520),
+            styleMask: [.titled, .closable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "ShakeTimer Settings"
+        window.isReleasedWhenClosed = false
+        window.center()
+        window.contentView = NSHostingView(
+            rootView: SettingsView(model: self)
+                .frame(width: 440)
+                .padding()
+        )
+        settingsWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     func connectGoogleCalendar() {
         Task {
             do {
@@ -212,6 +246,7 @@ final class AppModel: ObservableObject {
         activeAlarmTitle = title
         isAlarmActive = true
         overlayManager.start(
+            kind: settings.visualCueKind,
             intensity: settings.visualIntensity,
             maxDuration: settings.maxAlarmSeconds,
             respectReduceMotion: settings.respectReduceMotion

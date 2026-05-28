@@ -1,5 +1,6 @@
 import AppKit
 import QuartzCore
+import ShakeTimerCore
 
 @MainActor
 final class OverlayManager {
@@ -12,17 +13,17 @@ final class OverlayManager {
         active
     }
 
-    func start(intensity: Double, maxDuration: TimeInterval, respectReduceMotion: Bool) {
+    func start(kind: VisualCueKind, intensity: Double, maxDuration: TimeInterval, respectReduceMotion: Bool) {
         stop()
 
         let reduceMotion = respectReduceMotion && NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let clampedIntensity = max(0.1, min(1, reduceMotion ? min(intensity, 0.25) : intensity))
 
-        syncWindows(intensity: clampedIntensity, reduceMotion: reduceMotion)
+        syncWindows(kind: kind, intensity: clampedIntensity, reduceMotion: reduceMotion)
         for (window, screen) in zip(windows, NSScreen.screens) {
             window.setFrame(screen.frame, display: true)
-            guard let view = window.contentView as? ShakeOverlayView else { continue }
-            view.configure(intensity: clampedIntensity, reduceMotion: reduceMotion)
+            guard let view = window.contentView as? VisualCueOverlayView else { continue }
+            view.configure(kind: kind, intensity: clampedIntensity, reduceMotion: reduceMotion)
             view.startAnimation()
             window.orderFrontRegardless()
         }
@@ -43,23 +44,23 @@ final class OverlayManager {
         autoStopTimer = nil
         active = false
         for window in windows {
-            if let view = window.contentView as? ShakeOverlayView {
+            if let view = window.contentView as? VisualCueOverlayView {
                 view.stopAnimation()
             }
             window.orderOut(nil)
         }
     }
 
-    func refreshIfActive(intensity: Double, maxDuration: TimeInterval, respectReduceMotion: Bool) {
+    func refreshIfActive(kind: VisualCueKind, intensity: Double, maxDuration: TimeInterval, respectReduceMotion: Bool) {
         guard isActive else { return }
-        start(intensity: intensity, maxDuration: maxDuration, respectReduceMotion: respectReduceMotion)
+        start(kind: kind, intensity: intensity, maxDuration: maxDuration, respectReduceMotion: respectReduceMotion)
     }
 
-    private func syncWindows(intensity: Double, reduceMotion: Bool) {
+    private func syncWindows(kind: VisualCueKind, intensity: Double, reduceMotion: Bool) {
         let screens = NSScreen.screens
         if windows.count > screens.count {
             for window in windows.dropFirst(screens.count) {
-                if let view = window.contentView as? ShakeOverlayView {
+                if let view = window.contentView as? VisualCueOverlayView {
                     view.stopAnimation()
                 }
                 window.orderOut(nil)
@@ -69,7 +70,7 @@ final class OverlayManager {
 
         while windows.count < screens.count {
             let screen = screens[windows.count]
-            let view = ShakeOverlayView(intensity: intensity, reduceMotion: reduceMotion)
+            let view = VisualCueOverlayView(kind: kind, intensity: intensity, reduceMotion: reduceMotion)
             let window = NSWindow(
                 contentRect: screen.frame,
                 styleMask: [.borderless],
@@ -89,11 +90,13 @@ final class OverlayManager {
     }
 }
 
-private final class ShakeOverlayView: NSView {
+private final class VisualCueOverlayView: NSView {
+    private var kind: VisualCueKind
     private var intensity: Double
     private var reduceMotion: Bool
 
-    init(intensity: Double, reduceMotion: Bool) {
+    init(kind: VisualCueKind, intensity: Double, reduceMotion: Bool) {
+        self.kind = kind
         self.intensity = intensity
         self.reduceMotion = reduceMotion
         super.init(frame: .zero)
@@ -106,8 +109,9 @@ private final class ShakeOverlayView: NSView {
         nil
     }
 
-    func configure(intensity: Double, reduceMotion: Bool) {
+    func configure(kind: VisualCueKind, intensity: Double, reduceMotion: Bool) {
         stopAnimation()
+        self.kind = kind
         self.intensity = intensity
         self.reduceMotion = reduceMotion
         needsDisplay = true
@@ -116,16 +120,76 @@ private final class ShakeOverlayView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
 
-        let alpha = 0.10 + 0.10 * intensity
-        NSColor.systemRed.withAlphaComponent(alpha).setFill()
-        bounds.fill(using: .sourceOver)
-
-        drawEdgeBands()
-        drawScanLines()
+        effect.draw(in: bounds, intensity: intensity)
     }
 
     func startAnimation() {
         guard let layer else { return }
+        effect.addAnimations(to: layer, intensity: intensity, reduceMotion: reduceMotion)
+    }
+
+    func stopAnimation() {
+        guard let layer else { return }
+        layer.removeAllAnimations()
+        layer.transform = CATransform3DIdentity
+        layer.opacity = 1
+    }
+
+    private var effect: VisualCueEffect {
+        switch kind {
+        case .desktopShake:
+            DesktopShakeEffect()
+        case .edgePulse:
+            EdgePulseEffect()
+        case .screenFlash:
+            ScreenFlashEffect()
+        case .scanSweep:
+            ScanSweepEffect()
+        }
+    }
+}
+
+private protocol VisualCueEffect {
+    func draw(in bounds: NSRect, intensity: Double)
+    func addAnimations(to layer: CALayer, intensity: Double, reduceMotion: Bool)
+}
+
+private extension VisualCueEffect {
+    func opacityAnimation(values: [Double], duration: CFTimeInterval) -> CAKeyframeAnimation {
+        let animation = CAKeyframeAnimation(keyPath: "opacity")
+        animation.values = values
+        animation.duration = duration
+        animation.repeatCount = .infinity
+        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        return animation
+    }
+
+    func drawScanLines(in bounds: NSRect, intensity: Double, color: NSColor = .white) {
+        color.withAlphaComponent(0.07 + 0.08 * intensity).setStroke()
+        let path = NSBezierPath()
+        path.lineWidth = 2
+        let spacing = max(32, 80 - intensity * 40)
+        var y = bounds.minY
+        while y < bounds.maxY {
+            path.move(to: NSPoint(x: bounds.minX, y: y))
+            path.line(to: NSPoint(x: bounds.maxX, y: y + 12 * intensity))
+            y += spacing
+        }
+        path.stroke()
+    }
+}
+
+private struct DesktopShakeEffect: VisualCueEffect {
+    func draw(in bounds: NSRect, intensity: Double) {
+        let alpha = 0.10 + 0.10 * intensity
+        NSColor.systemRed.withAlphaComponent(alpha).setFill()
+        bounds.fill(using: .sourceOver)
+
+        drawEdgeBands(in: bounds, intensity: intensity)
+        drawScanLines(in: bounds, intensity: intensity)
+    }
+
+    func addAnimations(to layer: CALayer, intensity: Double, reduceMotion: Bool) {
         let amplitude = reduceMotion ? 4 * intensity : 18 * intensity
         let duration = reduceMotion ? 0.55 : 0.08
 
@@ -141,24 +205,12 @@ private final class ShakeOverlayView: NSView {
         y.repeatCount = .infinity
         y.timingFunction = CAMediaTimingFunction(name: .linear)
 
-        let opacity = CAKeyframeAnimation(keyPath: "opacity")
-        opacity.values = [0.45, 0.9, 0.55, 0.85, 0.45]
-        opacity.duration = reduceMotion ? 1.0 : 0.35
-        opacity.repeatCount = .infinity
-
-        layer.add(x, forKey: "shake-x")
-        layer.add(y, forKey: "shake-y")
-        layer.add(opacity, forKey: "shake-opacity")
+        layer.add(x, forKey: "cue-shake-x")
+        layer.add(y, forKey: "cue-shake-y")
+        layer.add(opacityAnimation(values: [0.45, 0.9, 0.55, 0.85, 0.45], duration: reduceMotion ? 1.0 : 0.35), forKey: "cue-opacity")
     }
 
-    func stopAnimation() {
-        guard let layer else { return }
-        layer.removeAllAnimations()
-        layer.transform = CATransform3DIdentity
-        layer.opacity = 1
-    }
-
-    private func drawEdgeBands() {
+    private func drawEdgeBands(in bounds: NSRect, intensity: Double) {
         let width = max(14, bounds.width * 0.018)
         let alpha = 0.25 + 0.35 * intensity
         NSColor.systemRed.withAlphaComponent(alpha).setFill()
@@ -168,18 +220,88 @@ private final class ShakeOverlayView: NSView {
         NSRect(x: bounds.minX, y: bounds.maxY - width, width: bounds.width, height: width).fill()
         NSRect(x: bounds.minX, y: bounds.minY, width: bounds.width, height: width).fill()
     }
+}
 
-    private func drawScanLines() {
-        NSColor.white.withAlphaComponent(0.07 + 0.08 * intensity).setStroke()
+private struct EdgePulseEffect: VisualCueEffect {
+    func draw(in bounds: NSRect, intensity: Double) {
+        NSColor.black.withAlphaComponent(0.04 + 0.06 * intensity).setFill()
+        bounds.fill(using: .sourceOver)
+
+        let railWidth = max(18, bounds.width * (0.012 + 0.012 * intensity))
+        NSColor.systemOrange.withAlphaComponent(0.5 + 0.35 * intensity).setFill()
+        NSRect(x: bounds.minX, y: bounds.minY, width: railWidth, height: bounds.height).fill()
+        NSRect(x: bounds.maxX - railWidth, y: bounds.minY, width: railWidth, height: bounds.height).fill()
+        NSColor.systemYellow.withAlphaComponent(0.35 + 0.35 * intensity).setFill()
+        NSRect(x: bounds.minX, y: bounds.maxY - railWidth, width: bounds.width, height: railWidth).fill()
+        NSRect(x: bounds.minX, y: bounds.minY, width: bounds.width, height: railWidth).fill()
+
+        drawCornerBrackets(in: bounds, railWidth: railWidth)
+    }
+
+    func addAnimations(to layer: CALayer, intensity: Double, reduceMotion: Bool) {
+        layer.add(opacityAnimation(values: [0.30, 1.0, 0.48, 0.95, 0.30], duration: reduceMotion ? 1.2 : 0.42), forKey: "cue-edge-opacity")
+    }
+
+    private func drawCornerBrackets(in bounds: NSRect, railWidth: CGFloat) {
+        NSColor.white.withAlphaComponent(0.55).setStroke()
         let path = NSBezierPath()
-        path.lineWidth = 2
-        let spacing = max(32, 80 - intensity * 40)
-        var y = bounds.minY
-        while y < bounds.maxY {
-            path.move(to: NSPoint(x: bounds.minX, y: y))
-            path.line(to: NSPoint(x: bounds.maxX, y: y + 12 * intensity))
-            y += spacing
+        path.lineWidth = 3
+        let length = railWidth * 4
+        let corners = [
+            (NSPoint(x: bounds.minX + railWidth, y: bounds.minY + railWidth), 1.0, 1.0),
+            (NSPoint(x: bounds.maxX - railWidth, y: bounds.minY + railWidth), -1.0, 1.0),
+            (NSPoint(x: bounds.minX + railWidth, y: bounds.maxY - railWidth), 1.0, -1.0),
+            (NSPoint(x: bounds.maxX - railWidth, y: bounds.maxY - railWidth), -1.0, -1.0)
+        ]
+        for (origin, xDirection, yDirection) in corners {
+            path.move(to: origin)
+            path.line(to: NSPoint(x: origin.x + length * xDirection, y: origin.y))
+            path.move(to: origin)
+            path.line(to: NSPoint(x: origin.x, y: origin.y + length * yDirection))
         }
         path.stroke()
+    }
+}
+
+private struct ScreenFlashEffect: VisualCueEffect {
+    func draw(in bounds: NSRect, intensity: Double) {
+        NSColor.systemYellow.withAlphaComponent(0.16 + 0.28 * intensity).setFill()
+        bounds.fill(using: .sourceOver)
+        NSColor.white.withAlphaComponent(0.10 + 0.18 * intensity).setFill()
+        bounds.insetBy(dx: bounds.width * 0.08, dy: bounds.height * 0.08).fill(using: .sourceOver)
+    }
+
+    func addAnimations(to layer: CALayer, intensity: Double, reduceMotion: Bool) {
+        layer.add(opacityAnimation(values: [0.12, 0.95, 0.28, 0.85, 0.12], duration: reduceMotion ? 1.2 : 0.6), forKey: "cue-flash-opacity")
+    }
+}
+
+private struct ScanSweepEffect: VisualCueEffect {
+    func draw(in bounds: NSRect, intensity: Double) {
+        NSColor.systemBlue.withAlphaComponent(0.06 + 0.10 * intensity).setFill()
+        bounds.fill(using: .sourceOver)
+
+        NSColor.systemCyan.withAlphaComponent(0.18 + 0.28 * intensity).setStroke()
+        let path = NSBezierPath()
+        path.lineWidth = max(4, 8 * intensity)
+        let spacing = max(44, 110 - intensity * 50)
+        var x = bounds.minX - bounds.height
+        while x < bounds.maxX {
+            path.move(to: NSPoint(x: x, y: bounds.minY))
+            path.line(to: NSPoint(x: x + bounds.height, y: bounds.maxY))
+            x += spacing
+        }
+        path.stroke()
+    }
+
+    func addAnimations(to layer: CALayer, intensity: Double, reduceMotion: Bool) {
+        let amplitude = reduceMotion ? 24 * intensity : 90 * intensity
+        let sweep = CAKeyframeAnimation(keyPath: "transform.translation.x")
+        sweep.values = [-amplitude, amplitude, -amplitude]
+        sweep.duration = reduceMotion ? 1.4 : 0.55
+        sweep.repeatCount = .infinity
+        sweep.timingFunction = CAMediaTimingFunction(name: .linear)
+        layer.add(sweep, forKey: "cue-scan-sweep")
+        layer.add(opacityAnimation(values: [0.25, 0.8, 0.45, 0.9, 0.25], duration: reduceMotion ? 1.2 : 0.5), forKey: "cue-scan-opacity")
     }
 }

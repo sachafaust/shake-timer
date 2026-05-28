@@ -14,11 +14,16 @@ struct SettingsView: View {
                     step: 1
                 )
                 Stepper(
-                    "Max shake duration: \(Int(model.settings.maxAlarmSeconds)) sec",
+                    "Max cue duration: \(Int(model.settings.maxAlarmSeconds)) sec",
                     value: secondsBinding(\.maxAlarmSeconds),
                     in: 5...120,
                     step: 5
                 )
+                Picker("Visual cue", selection: visualCueBinding()) {
+                    ForEach(VisualCueKind.allCases, id: \.self) { cue in
+                        Text(cue.title).tag(cue)
+                    }
+                }
                 Slider(value: doubleBinding(\.visualIntensity), in: 0.1...1) {
                     Text("Visual intensity")
                 } minimumValueLabel: {
@@ -26,12 +31,18 @@ struct SettingsView: View {
                 } maximumValueLabel: {
                     Text("High")
                 }
+                Text(model.settings.visualCueKind.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Preview Visual Cue") {
+                    model.previewVisualCue()
+                }
                 Toggle("Respect Reduce Motion", isOn: boolBinding(\.respectReduceMotion))
             }
 
             Section("Meetings") {
                 Stepper(
-                    "Shake before meetings: \(Int(model.settings.meetingLeadSeconds / 60)) min",
+                    "Cue before meetings: \(Int(model.settings.meetingLeadSeconds / 60)) min",
                     value: secondsBinding(\.meetingLeadSeconds, minutes: true),
                     in: 0...30,
                     step: 1
@@ -86,6 +97,14 @@ struct SettingsView: View {
             model.settings[keyPath: keyPath]
         } set: { newValue in
             model.settings[keyPath: keyPath] = newValue
+        }
+    }
+
+    private func visualCueBinding() -> Binding<VisualCueKind> {
+        Binding {
+            model.settings.visualCueKind
+        } set: { newValue in
+            model.settings.visualCueKind = newValue
         }
     }
 

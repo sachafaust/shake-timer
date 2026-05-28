@@ -3,6 +3,7 @@ import Foundation
 public struct AppSettings: Codable, Equatable, Sendable {
     public var defaultSnoozeSeconds: TimeInterval
     public var meetingLeadSeconds: TimeInterval
+    public var visualCueKind: VisualCueKind
     public var visualIntensity: Double
     public var maxAlarmSeconds: TimeInterval
     public var calendarPollSeconds: TimeInterval
@@ -13,6 +14,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public init(
         defaultSnoozeSeconds: TimeInterval = 5 * 60,
         meetingLeadSeconds: TimeInterval = 2 * 60,
+        visualCueKind: VisualCueKind = .desktopShake,
         visualIntensity: Double = 0.8,
         maxAlarmSeconds: TimeInterval = 30,
         calendarPollSeconds: TimeInterval = 60,
@@ -22,6 +24,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     ) {
         self.defaultSnoozeSeconds = defaultSnoozeSeconds
         self.meetingLeadSeconds = meetingLeadSeconds
+        self.visualCueKind = visualCueKind
         self.visualIntensity = visualIntensity
         self.maxAlarmSeconds = maxAlarmSeconds
         self.calendarPollSeconds = calendarPollSeconds
@@ -31,6 +34,33 @@ public struct AppSettings: Codable, Equatable, Sendable {
     }
 
     public static let defaults = AppSettings()
+
+    private enum CodingKeys: String, CodingKey {
+        case defaultSnoozeSeconds
+        case meetingLeadSeconds
+        case visualCueKind
+        case visualIntensity
+        case maxAlarmSeconds
+        case calendarPollSeconds
+        case googleClientID
+        case selectedCalendarID
+        case respectReduceMotion
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            defaultSnoozeSeconds: try container.decodeIfPresent(TimeInterval.self, forKey: .defaultSnoozeSeconds) ?? Self.defaults.defaultSnoozeSeconds,
+            meetingLeadSeconds: try container.decodeIfPresent(TimeInterval.self, forKey: .meetingLeadSeconds) ?? Self.defaults.meetingLeadSeconds,
+            visualCueKind: try container.decodeIfPresent(VisualCueKind.self, forKey: .visualCueKind) ?? Self.defaults.visualCueKind,
+            visualIntensity: try container.decodeIfPresent(Double.self, forKey: .visualIntensity) ?? Self.defaults.visualIntensity,
+            maxAlarmSeconds: try container.decodeIfPresent(TimeInterval.self, forKey: .maxAlarmSeconds) ?? Self.defaults.maxAlarmSeconds,
+            calendarPollSeconds: try container.decodeIfPresent(TimeInterval.self, forKey: .calendarPollSeconds) ?? Self.defaults.calendarPollSeconds,
+            googleClientID: try container.decodeIfPresent(String.self, forKey: .googleClientID) ?? Self.defaults.googleClientID,
+            selectedCalendarID: try container.decodeIfPresent(String.self, forKey: .selectedCalendarID) ?? Self.defaults.selectedCalendarID,
+            respectReduceMotion: try container.decodeIfPresent(Bool.self, forKey: .respectReduceMotion) ?? Self.defaults.respectReduceMotion
+        )
+    }
 }
 
 public final class SettingsStore {

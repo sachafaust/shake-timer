@@ -37,4 +37,12 @@ let due = planner.dueAlarms(
 )
 expect(due.isEmpty, "Planner should ignore already triggered events")
 
+let encodedSettings = try JSONEncoder().encode(AppSettings(visualCueKind: .scanSweep))
+let decodedSettings = try JSONDecoder().decode(AppSettings.self, from: encodedSettings)
+expect(decodedSettings.visualCueKind == .scanSweep, "Settings should persist the selected visual cue")
+
+let legacySettings = try JSONDecoder().decode(AppSettings.self, from: Data("{}".utf8))
+expect(legacySettings.visualCueKind == .desktopShake, "Legacy settings should default to desktop shake")
+expect(VisualCueKind.allCases.count >= 4, "Visual cue picker should offer multiple options")
+
 print("ShakeTimerCoreChecks passed")

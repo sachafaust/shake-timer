@@ -10,6 +10,7 @@ struct MenuBarView: View {
             header
             display
             timerSection
+            visualCueSection
             calendarSection
             footer
         }
@@ -32,7 +33,7 @@ struct MenuBarView: View {
             Spacer()
 
             StatusPill(
-                title: model.isAlarmActive ? "SHAKE" : model.timerSnapshot.state == .running ? "ARMED" : "IDLE",
+                title: model.isAlarmActive ? model.settings.visualCueKind.shortLabel : model.timerSnapshot.state == .running ? "ARMED" : "IDLE",
                 color: model.isAlarmActive ? TEPalette.red : model.timerSnapshot.state == .running ? TEPalette.orange : TEPalette.blue
             )
         }
@@ -62,7 +63,7 @@ struct MenuBarView: View {
                     .foregroundStyle(TEPalette.lcd.opacity(0.8))
                     .lineLimit(1)
             } else {
-                Text(model.googleCalendar.isConnected ? "CALENDAR READY / NO MEETING SHAKE QUEUED" : "LOCAL TIMER READY")
+                Text(model.googleCalendar.isConnected ? "CALENDAR READY / NO MEETING CUE QUEUED" : "LOCAL TIMER READY / \(model.settings.visualCueKind.shortLabel)")
                     .font(TEFonts.label)
                     .foregroundStyle(TEPalette.lcd.opacity(0.65))
             }
@@ -173,6 +174,35 @@ struct MenuBarView: View {
         }
     }
 
+    private var visualCueSection: some View {
+        TEPanel(title: "VISUAL CUE") {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 6) {
+                    ForEach(VisualCueKind.allCases, id: \.self) { cue in
+                        CueKey(
+                            cue: cue,
+                            selected: model.settings.visualCueKind == cue
+                        ) {
+                            model.settings.visualCueKind = cue
+                        }
+                    }
+                }
+
+                HStack {
+                    Text(model.settings.visualCueKind.detail.uppercased())
+                        .font(TEFonts.micro)
+                        .foregroundStyle(TEPalette.muted)
+                        .lineLimit(2)
+                    Spacer()
+                    Button("PREVIEW") {
+                        model.previewVisualCue()
+                    }
+                    .buttonStyle(TEKeyButtonStyle(tone: .blue, compact: true))
+                }
+            }
+        }
+    }
+
     private var footer: some View {
         VStack(alignment: .leading, spacing: 10) {
             if let lastError = model.lastError {
@@ -190,8 +220,8 @@ struct MenuBarView: View {
             }
 
             HStack {
-                SettingsLink {
-                    Text("SETTINGS")
+                Button("SETTINGS") {
+                    model.openSettings()
                 }
                 .buttonStyle(TEKeyButtonStyle(tone: .neutral, compact: true))
                 Spacer()
@@ -266,6 +296,27 @@ private struct PresetKey: View {
             .frame(width: 52, height: 42)
         }
         .buttonStyle(TEKeyButtonStyle(tone: .yellow))
+    }
+}
+
+private struct CueKey: View {
+    let cue: VisualCueKind
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Text(cue.shortLabel)
+                    .font(TEFonts.label)
+                    .lineLimit(1)
+                Rectangle()
+                    .fill(selected ? TEPalette.lcd : TEPalette.ink.opacity(0.22))
+                    .frame(width: 32, height: 4)
+            }
+            .frame(maxWidth: .infinity, minHeight: 36)
+        }
+        .buttonStyle(TEKeyButtonStyle(tone: selected ? .orange : .neutral, compact: true))
     }
 }
 
